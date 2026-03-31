@@ -1,0 +1,167 @@
+### Step 1: Build It
+
+```python
+from groq import Groq
+import json
+
+client = Groq()
+
+# --- Define tools the model can use ---
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get the current weather for a city.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "The city name, e.g., 'London'"
+                    }
+                },
+                "required": ["city"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": "Perform a mathematical calculation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "Math expression, e.g., '(25 * 1.8) + 32'"
+                    }
+                },
+                "required": ["expression"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_contacts",
+            "description": "Search a contact database by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Name to search for (partial matches work)"
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    }
+]
+
+# --- Implement the actual functions ---
+def get_weather(city):
+    weather_data = {
+        "london": {"temp_c": 12, "condition": "Cloudy", "humidity": 78},
+        "new york": {"temp_c": 22, "condition": "Sunny", "humidity": 45},
+        "tokyo": {"temp_c": 28, "condition": "Humid", "humidity": 89},
+        "sydney": {"temp_c": 18, "condition": "Partly cloudy", "humidity": 62},
+    }
+    return weather_data.get(city.lower(), {"temp_c": 20, "condition": "Unknown"})
+
+def calculate(expression):
+    try:
+        allowed = set("0123456789+-*/.() ")
+        if all(c in allowed for c in expression):
+            return {"result": eval(expression)}
+        return {"error": "Invalid expression"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def search_contacts(name):
+    contacts = [
+        {"name": "Alice Johnson", "email": "alice@example.com", "phone": "555-0101"},
+        {"name": "Bob Smith", "email": "bob@example.com", "phone": "555-0102"},
+        {"name": "Carol Williams", "email": "carol@example.com", "phone": "555-0103"},
+    ]
+    results = [c for c in contacts if name.lower() in c["name"].lower()]
+    return results if results else [{"message": f"No contacts found for '{name}'"}]
+
+tool_functions = {
+    "get_weather": lambda args: get_weather(args["city"]),
+    "calculate": lambda args: calculate(args["expression"]),
+    "search_contacts": lambda args: search_contacts(args["name"]),
+}
+
+# --- The function calling loop (this IS the agent loop!) ---
+def chat_with_tools(user_message):
+    print(f"\nUser: {user_message}")
+    print("-" * 60)
+
+    messages = [{"role": "user", "content": user_message}]
+
+    for step in range(5):  # Max 5 tool-calling rounds
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=1024,
+            tools=tools,
+            messages=messages,
+        )
+
+        choice = response.choices[0]
+
+        # If the model wants to call tools
+        if choice.message.tool_calls:
+            # Add the assistant message (with tool calls) to history
+            messages.append(choice.message)
+
+            for tool_call in choice.message.tool_calls:
+                fn_name = tool_call.function.name
+                fn_args = json.loads(tool_call.function.arguments)
+
+                print(f"  [Step {step+1}] Calling: {fn_name}({json.dumps(fn_args)})")
+                result = tool_functions[fn_name](fn_args)
+                print(f"  [Step {step+1}] Result:  {json.dumps(result)}")
+
+                # Feed the tool result back
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(result),
+                })
+        else:
+            # No tool calls — this is the final answer
+            final = choice.message.content
+            print(f"\nAssistant: {final}")
+            return final
+
+    return "Agent reached maximum steps."
+
+# --- Test it! ---
+chat_with_tools("What's the weather in Tokyo?")
+chat_with_tools("What's 15% tip on a $67.50 dinner bill?")
+chat_with_tools("Find Bob's contact info.")
+chat_with_tools("What's the temperature difference between New York and London in Fahrenheit?")
+```
+
+### Step 2: Watch Multi-Step Reasoning
+
+The last query is the most interesting — the model should:
+1. Call `get_weather` for New York
+2. Call `get_weather` for London
+3. Call `calculate` to convert the difference to Fahrenheit
+4. Combine it all into a natural answer
+
+This is the **agent loop**: Perceive, Reason, Act, Observe.
+
+> **Mini-Challenge 4:** Add a fourth tool: `get_time(timezone)` that returns the current time in different timezones. Test: "What time is it in Tokyo and what's the weather there?"
+
+> **Mini-Challenge 5:** What happens when you ask about a city not in the weather data? Add error handling so the agent says "Weather data not available" instead of crashing.
+
+> **Theory Box: Why This Is the Foundation of Agents**
+>
+> Look at what just happened: the LLM *decided* it needed info, *chose* a tool, *specified* arguments, *processed* the result, and *decided* whether to call another tool or answer. This loop — call, observe, decide — is the foundation of every AI agent. Module 1 of the Agentic AI series builds directly on this pattern.
+
+---
