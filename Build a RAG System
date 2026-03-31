@@ -1,0 +1,85 @@
+### Step 1: Build It
+
+```python
+from groq import Groq
+import chromadb
+
+client = Groq()
+
+# --- SETUP: Index your documents ---
+chroma_client = chromadb.Client()
+kb = chroma_client.create_collection("company_knowledge")
+
+# Your "company documents"
+documents = [
+    "Employees receive 20 days of PTO per year. Unused days carry over up to 5 days.",
+    "The engineering team uses Python and TypeScript. Go is used for infrastructure.",
+    "Remote work is allowed up to 3 days per week. Fully remote requires VP approval.",
+    "Performance reviews happen in March and September. Self-reviews are due 2 weeks before.",
+    "Health insurance covers employee, spouse, and dependents under 26.",
+    "The company laptop budget is $2,500 for engineers and $1,800 for non-technical roles.",
+    "Parental leave is 16 weeks for primary caregivers and 8 weeks for secondary caregivers.",
+    "The office is at 123 Innovation Drive, San Francisco. Parking is free in the garage.",
+    "Expense reports must be submitted within 30 days. Meals up to $50 don't need receipts.",
+    "The company matches 401k contributions up to 4% of salary. Vesting is immediate.",
+]
+
+kb.add(documents=documents, ids=[f"doc_{i}" for i in range(len(documents))])
+print(f"Indexed {len(documents)} company documents.")
+
+# --- QUERY PHASE ---
+def ask_rag(question):
+    """Answer a question using RAG."""
+    # Step 1: Retrieve relevant documents
+    results = kb.query(query_texts=[question], n_results=3)
+    relevant_docs = results["documents"][0]
+    distances = results["distances"][0]
+
+    print(f"\nQuestion: {question}")
+    print(f"Retrieved context (distance scores):")
+    for doc, dist in zip(relevant_docs, distances):
+        print(f"  [{dist:.3f}] {doc[:80]}...")
+
+    # Step 2: Build the prompt with context
+    context = "\n---\n".join(relevant_docs)
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        max_tokens=300,
+        messages=[
+            {"role": "system", "content": "Answer questions using ONLY the provided context. If the context doesn't contain enough information, say so. Be specific and cite details."},
+            {"role": "user", "content": f"Context from company documents:\n---\n{context}\n---\n\nQuestion: {question}"}
+        ]
+    )
+
+    answer = response.choices[0].message.content
+    print(f"\nAnswer: {answer}")
+    return answer
+
+# --- Test it! ---
+ask_rag("How many vacation days do I get?")
+ask_rag("Can I work from home every day?")
+ask_rag("What happens during performance reviews?")
+ask_rag("What laptop can I get as an engineer?")
+```
+
+### Step 2: Test the Boundaries
+
+```python
+# Should trigger "I don't have enough information"
+ask_rag("What's the company's stock ticker symbol?")
+
+# Should pull from multiple documents
+ask_rag("What are the financial benefits of working here?")
+
+# Tricky: "remote" appears in the remote-work doc, but this is about something else
+ask_rag("Does the company sell remote control cars?")
+```
+
+> **Mini-Challenge 3:** Add 3 more company documents about topics NOT already covered (e.g., dress code, meeting rooms, tech stack). Then write queries that test the new documents.
+
+> **Theory Box: How RAG Works**
+>
+> RAG combines the *retrieval* power of embeddings with the *generation* power of LLMs. The vector database finds relevant chunks using semantic similarity. Those chunks get injected into the prompt, giving the LLM accurate, specific context it was never trained on. RAG is the most common way to give LLMs access to private/current data.
+
+---
