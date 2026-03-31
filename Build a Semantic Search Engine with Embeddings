@@ -1,0 +1,73 @@
+### Step 1: Build It
+
+ChromaDB has a built-in embedding model — no external API needed for embeddings.
+
+```python
+import chromadb
+
+# Create an in-memory vector database
+chroma_client = chromadb.Client()
+collection = chroma_client.create_collection("semantic_search")
+
+# Our "database" of documents
+documents = [
+    "Python is a versatile programming language used in web development and data science.",
+    "The Great Wall of China stretches over 13,000 miles across northern China.",
+    "Machine learning models learn patterns from data to make predictions.",
+    "Photosynthesis converts sunlight into chemical energy in plants.",
+    "JavaScript is the dominant language for building interactive websites.",
+    "The Amazon rainforest produces about 20% of the world's oxygen.",
+    "Neural networks are inspired by the structure of the human brain.",
+    "The Sahara Desert covers most of North Africa and is the largest hot desert.",
+    "SQL is used to query and manage data in relational databases.",
+    "Climate change is causing rising sea levels and extreme weather events.",
+]
+
+# Index all documents (ChromaDB auto-creates embeddings)
+collection.add(
+    documents=documents,
+    ids=[f"doc_{i}" for i in range(len(documents))]
+)
+print(f"Indexed {len(documents)} documents.")
+
+# --- Search by meaning ---
+def semantic_search(query, top_k=3):
+    """Search documents by meaning, not keywords."""
+    results = collection.query(query_texts=[query], n_results=top_k)
+
+    print(f"\nQuery: \"{query}\"")
+    print("-" * 60)
+    for rank, (doc, distance) in enumerate(
+        zip(results["documents"][0], results["distances"][0]), 1
+    ):
+        similarity = 1 - distance  # Convert distance to similarity
+        print(f"  #{rank} (similarity: {similarity:.3f}): {doc}")
+
+    return results
+
+# --- Test it! ---
+semantic_search("coding languages for beginners")
+semantic_search("environmental problems facing the planet")
+semantic_search("how do computers learn from examples?")
+semantic_search("ancient structures built by civilizations")
+```
+
+### Step 2: Try These Searches
+
+```python
+semantic_search("things that are really big")
+semantic_search("ways computers mimic humans")
+semantic_search("outdoor nature topics")
+```
+
+Notice: "coding languages" finds "programming language" — it understood the *meaning*, not just keywords.
+
+> **Mini-Challenge 1:** Add 5 more documents on topics of your choice. Then write 3 queries that test whether the search finds them correctly.
+
+> **Mini-Challenge 2:** Search for "things that are NOT about technology." Does semantic search handle negation well? Why or why not?
+
+> **Theory Box: Why Embeddings Work**
+>
+> Embeddings map text into a high-dimensional space where *meaning* determines position. "Dog" and "puppy" land near each other; "dog" and "quantum" land far apart. ChromaDB uses a lightweight embedding model internally — in production, you'd use OpenAI, Cohere, or sentence-transformers for higher quality.
+
+---
