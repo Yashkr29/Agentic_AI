@@ -1,0 +1,121 @@
+### Step 1: See Why Evals Matter
+
+```python
+from groq import Groq
+
+client = Groq()
+
+# Run the same prompt 3 times — are results consistent?
+prompt = "List exactly 3 benefits of exercise, one per line."
+for i in range(3):
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile", max_tokens=200,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    lines = [l for l in response.choices[0].message.content.strip().split("\n") if l.strip()]
+    print(f"Run {i+1}: {len(lines)} lines → {lines}")
+```
+
+Did you get exactly 3 lines each time? Probably not consistently. This is why we need evals.
+
+### Step 2: Build the Eval Framework
+
+```python
+from groq import Groq
+import json
+import time
+
+client = Groq()
+
+def get_response(prompt):
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile", max_tokens=300,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
+
+# --- Strategy 1: Contains Check ---
+def eval_contains(prompt, expected_substrings):
+    response = get_response(prompt)
+    checks = {s: s.lower() in response.lower() for s in expected_substrings}
+    return {"passed": all(checks.values()), "checks": checks, "response": response[:200]}
+
+# --- Strategy 2: Format Check ---
+def eval_format(prompt, check_fn):
+    response = get_response(prompt)
+    try:
+        passed = check_fn(response)
+    except Exception:
+        passed = False
+    return {"passed": passed, "response": response[:200]}
+
+# --- Strategy 3: LLM-as-Judge ---
+def eval_llm_judge(prompt, criteria):
+    response = get_response(prompt)
+    judge_prompt = f"""Grade this response 1-5 for each criterion.
+
+CRITERIA: {json.dumps(criteria)}
+PROMPT: {prompt}
+RESPONSE: {response}
+
+Return ONLY valid JSON: {{"scores": {{"criterion": score}}, "overall": score, "reasoning": "one sentence"}}"""
+
+    judge_resp = get_response(judge_prompt)
+    try:
+        scores = json.loads(judge_resp[judge_resp.index("{"):judge_resp.rindex("}")+1])
+    except (ValueError, json.JSONDecodeError):
+        scores = {"error": "Could not parse", "raw": judge_resp[:200]}
+    return {"response": response[:200], "evaluation": scores}
+
+# --- Run the test suite ---
+test_suite = {
+    "factual": [
+        {"prompt": "What is the capital of France? One word.", "strategy": "contains", "expected": ["paris"]},
+        {"prompt": "Is Python interpreted or compiled? One word.", "strategy": "contains", "expected": ["interpreted"]},
+    ],
+    "format": [
+        {"prompt": "List exactly 3 colors, one per line, no numbering.", "strategy": "format",
+         "check": lambda r: len([l for l in r.strip().split("\n") if l.strip()]) == 3},
+        {"prompt": "Generate valid JSON with keys 'name' and 'age'.", "strategy": "format",
+         "check": lambda r: "name" in json.loads(r[r.index("{"):r.rindex("}")+1])},
+    ],
+    "quality": [
+        {"prompt": "Explain APIs to a 10-year-old in 2 sentences.", "strategy": "llm_judge",
+         "criteria": ["age_appropriate", "accuracy", "conciseness"]},
+    ],
+}
+
+total, passed = 0, 0
+for category, cases in test_suite.items():
+    print(f"\n{'='*50}\n{category.upper()}\n{'='*50}")
+    for case in cases:
+        total += 1
+        print(f"\nTest: {case['prompt'][:60]}...")
+        if case["strategy"] == "contains":
+            result = eval_contains(case["prompt"], case["expected"])
+            if result["passed"]: passed += 1
+            print(f"  {'PASS' if result['passed'] else 'FAIL'} | {result['checks']}")
+        elif case["strategy"] == "format":
+            result = eval_format(case["prompt"], case["check"])
+            if result["passed"]: passed += 1
+            print(f"  {'PASS' if result['passed'] else 'FAIL'}")
+        elif case["strategy"] == "llm_judge":
+            result = eval_llm_judge(case["prompt"], case["criteria"])
+            overall = result.get("evaluation", {}).get("overall", 0)
+            if isinstance(overall, (int, float)) and overall >= 4: passed += 1
+            print(f"  Scores: {json.dumps(result['evaluation'])[:150]}")
+        print(f"  Response: {result['response'][:80]}...")
+        time.sleep(0.3)
+
+print(f"\n{'='*50}\nFINAL: {passed}/{total} passed ({passed/total*100:.0f}%)\n{'='*50}")
+```
+
+> **Mini-Challenge 7:** Add 3 more test cases — one for each strategy. Run the suite and see if they pass.
+
+> **Mini-Challenge 8:** Run the eval suite 3 times. Do you get the same pass rate each time? What does that tell you about LLM reliability?
+
+> **Theory Box: Evals Are Essential for Agents**
+>
+> Agents make multiple LLM calls per task — if each call has a 90% success rate, a 5-step agent has only 0.9^5 = 59% end-to-end reliability. Evals help you catch regressions, measure quality, and build confidence before deploying.
+
+---
