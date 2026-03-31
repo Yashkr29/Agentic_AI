@@ -1,0 +1,19 @@
+```bash
+pip install groq chromadb numpy
+```
+
+```python
+from groq import Groq
+import chromadb
+import json
+
+client = Groq()  # Uses GROQ_API_KEY env variable (free at console.groq.com)
+
+# Quick test
+response = client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+    max_tokens=20,
+    messages=[{"role": "user", "content": "Say 'Lab ready!' and nothing else."}]
+)
+print(response.choices[0].message.content)
+```
